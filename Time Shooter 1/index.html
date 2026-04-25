@@ -66,9 +66,37 @@
       canvas.style.background = "url('" + buildUrl + "/TimeGD.jpg') center / cover";
       loadingCover.style.display = "";
 
-      const script = document.createElement("script");
-      script.src = loaderUrl;
-      script.onload = () => {
+      const blobUrlsToRevoke = [];
+
+      function base64ToBlobUrl(base64, mimeType) {
+        const binary = atob(base64);
+        const chunkSize = 32768;
+        const chunks = [];
+        for (let i = 0; i < binary.length; i += chunkSize) {
+          const slice = binary.slice(i, i + chunkSize);
+          const bytes = new Uint8Array(slice.length);
+          for (let j = 0; j < slice.length; j++) {
+            bytes[j] = slice.charCodeAt(j);
+          }
+          chunks.push(bytes);
+        }
+        const blobUrl = URL.createObjectURL(new Blob(chunks, { type: mimeType }));
+        blobUrlsToRevoke.push(blobUrl);
+        return blobUrl;
+      }
+
+      function revokeBlobUrls() {
+        while (blobUrlsToRevoke.length) {
+          URL.revokeObjectURL(blobUrlsToRevoke.pop());
+        }
+      }
+
+      window.addEventListener("beforeunload", revokeBlobUrls);
+
+      function startUnity() {
+        const script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = () => {
         createUnityInstance(canvas, config, (progress) => {
           spinner.style.display = "none";
           progressBarEmpty.style.display = "";
@@ -85,9 +113,33 @@
           }
         }).catch((message) => {
           alert(message);
+          revokeBlobUrls();
         });
-      };
-      document.body.appendChild(script);
+        };
+        document.body.appendChild(script);
+      }
+
+      if (window.location.protocol === "file:") {
+        const embeddedScript = document.createElement("script");
+        embeddedScript.src = buildUrl + "/TimeGD.embedded.js";
+        embeddedScript.onload = () => {
+          const embedded = window.__TIMEGD_EMBEDDED__;
+          if (!embedded) {
+            alert("Offline assets are missing. Keep Build/TimeGD.embedded.js next to index.html.");
+            return;
+          }
+          config.dataUrl = base64ToBlobUrl(embedded.dataBase64, "application/octet-stream");
+          config.frameworkUrl = base64ToBlobUrl(embedded.frameworkBase64, "application/javascript");
+          config.codeUrl = base64ToBlobUrl(embedded.codeBase64, "application/wasm");
+          startUnity();
+        };
+        embeddedScript.onerror = () => {
+          alert("Could not load Build/TimeGD.embedded.js for offline mode.");
+        };
+        document.body.appendChild(embeddedScript);
+      } else {
+        startUnity();
+      }
     </script>
   </body>
 </html>
